@@ -18,8 +18,18 @@ from config_manager import ConfigManager
 from filter_engine import FilterEngine
 from bot_notifier import BotNotifier
 
-# Inicializa colorama para suporte a cores no terminal Windows
-colorama.init(autoreset=True)
+# Garante que o diretório de trabalho seja sempre a pasta do script (útil na inicialização do Windows)
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# Se estiver rodando em segundo plano (pythonw.exe), redireciona saída para bot.log
+IS_BACKGROUND = sys.stdout is None
+if IS_BACKGROUND:
+    log_file = open("bot.log", "a", encoding="utf-8", buffering=1)
+    sys.stdout = log_file
+    sys.stderr = log_file
+
+# Inicializa colorama para suporte a cores no terminal Windows (desativa cores se for log em arquivo)
+colorama.init(autoreset=True, strip=IS_BACKGROUND)
 
 # Carrega variáveis de ambiente do .env
 load_dotenv()
@@ -56,8 +66,27 @@ engine = FilterEngine(
     cooldown_minutes=config.cooldown_minutes
 )
 
-# Inicializa o cliente Telethon
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+def ensure_single_instance():
+    """Impede que duas instâncias do bot rodem ao mesmo tempo no Windows."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, False, "FiltroTelegramBotSingleInstanceMutex")
+    if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        kernel32.CloseHandle(mutex)
+        print(Fore.YELLOW + "\n[AVISO] O bot já está rodando em outra janela ou em segundo plano!")
+        print(Fore.WHITE + "Para evitar mensagens duplicadas e erro na sessão, esta nova instância não foi iniciada.")
+        print(Fore.CYAN + "Dica: se quiser fechar o processo em segundo plano, finalize 'pythonw.exe' no Gerenciador de Tarefas.\n")
+        sys.exit(0)
+    return mutex
+
+
+if __name__ == "__main__":
+    _INSTANCE_MUTEX = ensure_single_instance()
+
+# Inicializa o cliente Telethon com reconexão automática resiliente
+client = TelegramClient(SESSION_NAME, API_ID, API_HASH, connection_retries=20, retry_delay=5, auto_reconnect=True)
 
 # Estatísticas em tempo de execução
 stats = {
@@ -517,8 +546,20 @@ def print_banner(me):
 
 
 async def main():
-    await client.connect()
+    # Aguarda conexão com a internet caso o Windows tenha acabado de ligar
+    while True:
+        try:
+            await client.connect()
+            break
+        except (OSError, ConnectionError) as conn_err:
+            time_str = datetime.now().strftime("%H:%M:%S")
+            print(Fore.YELLOW + f"[{time_str}] [AGUARDANDO REDE] Sem conexão com Telegram ({conn_err}). Tentando novamente em 5s...")
+            await asyncio.sleep(5)
+
     if not await client.is_user_authorized():
+        if IS_BACKGROUND:
+            print("[ERRO] Sessão não autorizada! Execute o iniciar.bat manualmente na primeira vez para fazer login.")
+            return
         print(Fore.CYAN + "=" * 60)
         print(Fore.GREEN + Style.BRIGHT + "       PRIMEIRO ACESSO - CONEXÃO COM TELEGRAM")
         print(Fore.CYAN + "=" * 60)

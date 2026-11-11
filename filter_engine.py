@@ -92,6 +92,9 @@ class FilterEngine:
 
     def _cleanup_history(self, current_time: float):
         """Remove registros antigos do histórico de duplicatas."""
+        if self.cooldown_seconds <= 0:
+            self.history.clear()
+            return
         cutoff = current_time - self.cooldown_seconds
         to_remove = []
         for h, t in self.history.items():
@@ -152,12 +155,14 @@ class FilterEngine:
         if not matched_term:
             return False, None, price_blocked_reason or "Nenhum termo de interesse encontrado"
 
-        # 3. Verifica duplicatas recentes
-        fingerprint = self._generate_fingerprint(text, urls)
-        if fingerprint in self.history:
-            return False, None, f"Promoção repetida (ignorada pelo cooldown de {int(self.cooldown_seconds / 60)} min)"
+        # 3. Verifica duplicatas recentes (se cooldown > 0)
+        if self.cooldown_seconds > 0:
+            fingerprint = self._generate_fingerprint(text, urls)
+            if fingerprint in self.history:
+                return False, None, f"Promoção repetida (ignorada pelo cooldown de {int(self.cooldown_seconds / 60)} min)"
 
-        # Registra no histórico
-        self.history[fingerprint] = now
+            # Registra no histórico
+            self.history[fingerprint] = now
+
         return True, matched_term, None
 

@@ -26,6 +26,13 @@ Ele cuidará de ativar o ambiente virtual, instalar os pacotes necessários e in
 python main.py
 ```
 
+### Opção 3: Iniciar automaticamente com o Windows (Segundo Plano)
+
+Depois de já ter feito o primeiro login via `iniciar.bat`:
+* Dê **dois cliques em `ativar_inicializacao.bat`** — ele cria um atalho na pasta *Inicializar* do Windows (`shell:startup`) usando `pythonw.exe`, rodando o bot **silenciosamente em segundo plano** (sem janela aberta) toda vez que você ligar o PC.
+* Os registros de funcionamento ficam salvos no arquivo `bot.log`.
+* Para desativar no futuro, dê dois cliques em `desativar_inicializacao.bat`.
+
 ---
 
 ## 🔑 Primeiro Acesso (Login no Telegram)
