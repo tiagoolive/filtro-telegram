@@ -135,6 +135,7 @@ async def handle_saved_command(event: events.NewMessage.Event, my_id: int):
             "• `/delcanal <id/@user>` - Remove canal da lista restrita\n\n"
             "⚙️ **Status & Sistema:**\n"
             "• `/destino <me/@canal/id>` - Define para onde enviar os alertas\n"
+            "• `/aqui` - Envie dentro de um grupo/canal privado para torná-lo o destino\n"
             "• `/status` - Resumo do bot e total de promoções capturadas\n"
             "• `/limparhistorico` - Reseta o histórico de duplicatas imediatas"
         )
@@ -217,22 +218,22 @@ async def handle_saved_command(event: events.NewMessage.Event, my_id: int):
         await event.reply(f"🔄 Modo alterado com sucesso!\nAgora monitorando: {mode_str}")
 
     elif cmd == "/canais":
-        status_msg = await event.reply("⏳ Escaneando canais inscritos na sua conta...")
+        status_msg = await event.reply("⏳ Escaneando canais e grupos da sua conta...")
         channels_found = []
         try:
             async for dialog in client.iter_dialogs(limit=100):
-                if dialog.is_channel:
-                    username_str = f"@{dialog.entity.username}" if getattr(dialog.entity, "username", None) else f"ID: `{dialog.id}`"
-                    channels_found.append(f"• **{dialog.name}** ({username_str})")
+                if dialog.is_channel or dialog.is_group:
+                    username_str = f"@{dialog.entity.username} | " if getattr(dialog.entity, "username", None) else ""
+                    channels_found.append(f"• **{dialog.name}** ({username_str}ID: `{dialog.id}`)")
         except Exception as e:
-            await status_msg.edit(f"❌ Erro ao listar canais: {e}")
+            await status_msg.edit(f"❌ Erro ao listar canais/grupos: {e}")
             return
 
         if not channels_found:
-            await status_msg.edit("ℹ️ Nenhum canal público ou privado encontrado na sua conta.")
+            await status_msg.edit("ℹ️ Nenhum canal ou grupo encontrado na sua conta.")
             return
 
-        header = f"📢 **Seus Canais Encontrados ({len(channels_found)}):**\n\n"
+        header = f"📢 **Seus Canais e Grupos ({len(channels_found)}):**\n\n"
         # Limita para não estourar 4096 caracteres do Telegram
         body = "\n".join(channels_found[:35])
         if len(channels_found) > 35:
@@ -305,6 +306,19 @@ async def on_new_message(event: events.NewMessage.Event):
     if not (event.is_channel or event.is_group):
         return
 
+    # Atalho rápido: enviar /aqui dentro de qualquer grupo ou canal privado define ele como destino
+    raw_cmd = (event.raw_text or "").strip().lower()
+    if event.out and raw_cmd in ("/aqui", "/definiraqui"):
+        chat = await event.get_chat()
+        chat_title = utils.get_display_name(chat) if chat else "este chat"
+        config.set_target_chat(str(event.chat_id))
+        await event.reply(
+            f"✅ **Destino atualizado!**\n"
+            f"As promoções filtradas agora aparecerão aqui em **{chat_title}** (`{event.chat_id}`)."
+        )
+        print(Fore.CYAN + f"[DESTINO] Alterado via /aqui para '{chat_title}' ({event.chat_id})")
+        return
+
     # 3. Ignora mensagens enviadas pelo próprio usuário em outros grupos
     if event.out:
         return
@@ -313,6 +327,12 @@ async def on_new_message(event: events.NewMessage.Event):
     sync_config_if_changed()
 
     chat = await event.get_chat()
+
+    # Nunca monitora o próprio chat/grupo de destino para evitar loops
+    target_str_cfg = str(config.target_chat).strip()
+    chat_username = getattr(chat, "username", "") or ""
+    if str(event.chat_id) == target_str_cfg or (chat_username and target_str_cfg.lstrip("@").lower() == chat_username.lower()):
+        return
 
     # 4. Verifica filtro de canais específicos se monitor_all estiver desativado
     if not config.monitor_all:
@@ -400,7 +420,8 @@ def print_banner(me):
     print(Fore.GREEN + Style.BRIGHT + "   ⚡ BOT DE FILTRO DE PROMOÇÕES TELEGRAM ATIVO ⚡   ")
     print(Fore.CYAN + "=" * 60)
     print(Fore.YELLOW + f"👤 Conectado como: " + Fore.WHITE + f"{me.first_name} (@{me.username or 'sem username'}) [ID: {me.id}]")
-    print(Fore.YELLOW + f"🎯 Destino dos alertas: " + Fore.WHITE + f"{config.target_chat} (Mensagens Salvas)")
+    dest_label = "me (Mensagens Salvas)" if str(config.target_chat).lower() == "me" else str(config.target_chat)
+    print(Fore.YELLOW + f"🎯 Destino dos alertas: " + Fore.WHITE + dest_label)
     print(Fore.YELLOW + f"🔍 Palavras-chave ({len(config.keywords)}): " + Fore.WHITE + f"{', '.join(config.keywords[:6])}{'...' if len(config.keywords) > 6 else ''}")
     print(Fore.YELLOW + f"🚫 Bloqueadas ({len(config.negative_keywords)}): " + Fore.WHITE + f"{', '.join(config.negative_keywords[:5])}{'...' if len(config.negative_keywords) > 5 else ''}")
     print(Fore.YELLOW + f"📡 Modo: " + Fore.WHITE + ("TODOS os canais da conta" if config.monitor_all else f"{len(config.channels)} canais específicos"))
@@ -433,6 +454,8 @@ async def main():
     )
 
     me = await client.get_me()
+    # Carrega diálogos recentes no cache da sessão para garantir resolução de IDs de grupos/canais privados
+    await client.get_dialogs(limit=50)
     print_banner(me)
     await client.run_until_disconnected()
 

@@ -1,7 +1,13 @@
 {
   "monitor_all_channels": true,
   "channels": [],
-  "keywords": ["kindle", "placa de video", "processador", "atk a9", "v9 pro 2"],
+  "keywords": [
+    "kindle",
+    "placa de video",
+    "processador",
+    "atk a9",
+    "v9 pro 2"
+  ],
   "negative_keywords": [
     "capa",
     "capinha",
@@ -10,7 +16,7 @@
     "recondicionado",
     "usado"
   ],
-  "target_chat": "me",
+  "target_chat": "-5364387067",
   "add_tag_reply": true,
   "cooldown_minutes": 1
 }
