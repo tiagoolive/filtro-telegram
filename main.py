@@ -16,6 +16,7 @@ from colorama import Fore, Style
 
 from config_manager import ConfigManager
 from filter_engine import FilterEngine
+from bot_notifier import BotNotifier
 
 # Inicializa colorama para suporte a cores no terminal Windows
 colorama.init(autoreset=True)
@@ -27,6 +28,7 @@ API_ID_RAW = os.getenv("TELEGRAM_API_ID")
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 PHONE = os.getenv("TELEGRAM_PHONE")
 ENV_TARGET_CHAT = os.getenv("TARGET_CHAT")
+ENV_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 SESSION_NAME = "filtro_promocoes"
 
 if not API_ID_RAW or not API_HASH:
@@ -43,6 +45,10 @@ except ValueError:
 config = ConfigManager()
 if config.target_chat == "me" and ENV_TARGET_CHAT and ENV_TARGET_CHAT.strip().lower() != "me":
     config.set_target_chat(ENV_TARGET_CHAT.strip())
+
+# Notificador sonoro opcional via BotFather
+initial_bot_token = config.bot_token or ENV_BOT_TOKEN or ""
+bot_notifier = BotNotifier(initial_bot_token)
 
 engine = FilterEngine(
     keywords=config.keywords,
@@ -103,6 +109,9 @@ def sync_config_if_changed():
             config.negative_keywords,
             config.cooldown_minutes
         )
+        new_token = config.bot_token or os.getenv("TELEGRAM_BOT_TOKEN") or ""
+        if new_token != bot_notifier.token:
+            bot_notifier.set_token(new_token)
         time_str = datetime.now().strftime("%H:%M:%S")
         print(Fore.CYAN + f"[{time_str}] [RELOAD] config.json alterado no disco. Regras atualizadas ({len(config.keywords)} termos ativos)!")
 
@@ -136,6 +145,7 @@ async def handle_saved_command(event: events.NewMessage.Event, my_id: int):
             "⚙️ **Status & Sistema:**\n"
             "• `/destino <me/@canal/id>` - Define para onde enviar os alertas\n"
             "• `/aqui` - Envie dentro de um grupo/canal privado para torná-lo o destino\n"
+            "• `/token <bot_token>` - Ativa notificações sonoras via bot do @BotFather\n"
             "• `/status` - Resumo do bot e total de promoções capturadas\n"
             "• `/limparhistorico` - Reseta o histórico de duplicatas imediatas"
         )
@@ -273,9 +283,48 @@ async def handle_saved_command(event: events.NewMessage.Event, my_id: int):
         config.set_target_chat(arg)
         await event.reply(f"✅ Destino dos alertas atualizado para: `{config.target_chat}`")
 
+    elif cmd in ("/token", "/bot"):
+        if not arg:
+            curr_bot = bot_notifier.bot_info.get("username") if bot_notifier.bot_info else None
+            status_desc = f"Ativo (@{curr_bot})" if curr_bot else ("Ativo" if bot_notifier.is_enabled else "Desativado")
+            await event.reply(
+                f"🤖 **Status do Notificador Sonoro:** `{status_desc}`\n\n"
+                "Para ativar alertas com som no celular e PC:\n"
+                "1. Abra o @BotFather no Telegram e envie `/newbot`\n"
+                "2. Copie o token gerado (ex: `123456:ABC...`)\n"
+                "3. Envie aqui: `/token SEU_TOKEN`\n\n"
+                "_Para desativar: `/token remover`_"
+            )
+            return
+
+        if arg.lower() in ("remover", "off", "desativar", "del"):
+            config.set_bot_token("")
+            bot_notifier.set_token("")
+            await event.reply("🔕 Notificador sonoro desativado.")
+            return
+
+        test_notifier = BotNotifier(arg)
+        info = await test_notifier.verify()
+        if info:
+            config.set_bot_token(arg)
+            bot_notifier.set_token(arg)
+            bot_notifier.bot_info = info
+            bot_user = info.get("username", "")
+            await event.reply(
+                f"✅ **Bot Notificador Conectado com Sucesso!**\n\n"
+                f"🤖 **Nome:** {info.get('first_name')} (@{bot_user})\n"
+                f"🔔 **Notificações sonoras:** ATIVADAS!\n\n"
+                f"⚠️ **Importante para tocar som:**\n"
+                f"• Se o destino for um **grupo privado**, adicione o @{bot_user} dentro do grupo!\n"
+                f"• Se o destino for suas **Mensagens Salvas**, abra uma conversa com o @{bot_user} e clique em **Começar / Start**!"
+            )
+        else:
+            await event.reply("❌ Não foi possível validar este token. Verifique se copiou corretamente do @BotFather.")
+
     elif cmd == "/status":
         last_promo = stats["last_promo_time"]
         last_str = datetime.fromtimestamp(last_promo).strftime("%H:%M:%S - %d/%m") if last_promo else "Nenhuma ainda"
+        sound_status = f"Ativas (@{bot_notifier.bot_info.get('username')})" if (bot_notifier.is_enabled and bot_notifier.bot_info) else ("Ativas" if bot_notifier.is_enabled else "Mudas (adicione /token)")
         status_text = (
             "📊 **Status do Filtro de Promoções**\n\n"
             f"⏱️ **Tempo online:** `{format_uptime()}`\n"
@@ -285,7 +334,8 @@ async def handle_saved_command(event: events.NewMessage.Event, my_id: int):
             f"🔍 **Palavras-chave ativas:** `{len(config.keywords)}`\n"
             f"🚫 **Palavras bloqueadas:** `{len(config.negative_keywords)}`\n"
             f"📡 **Modo:** `{'Todos os canais' if config.monitor_all else 'Canais específicos'}`\n"
-            f"🎯 **Destino:** `{config.target_chat}`"
+            f"🎯 **Destino:** `{config.target_chat}`\n"
+            f"🔔 **Notificações sonoras:** `{sound_status}`"
         )
         await event.reply(status_text)
 
@@ -385,31 +435,55 @@ async def on_new_message(event: events.NewMessage.Event):
             forwarded = await client.forward_messages(target_dest, event.message)
 
             if config.add_tag_reply:
-                tag_text = (
-                    f"🎯 **Promoção Encontrada!**\n"
-                    f"🏷️ **Termo correspondente:** `{matched_term}`\n"
-                    f"📢 **Canal de origem:** {chat_title}"
-                )
-                try:
-                    target_id = forwarded.id if hasattr(forwarded, "id") else (forwarded[0].id if isinstance(forwarded, list) and len(forwarded) > 0 else None)
-                    await client.send_message(target_dest, tag_text, reply_to=target_id)
-                except Exception:
-                    await client.send_message(target_dest, tag_text)
+                target_id = forwarded.id if hasattr(forwarded, "id") else (forwarded[0].id if isinstance(forwarded, list) and len(forwarded) > 0 else None)
+                bot_sent = False
+
+                # Se o Notificador Sonoro estiver ativo, ele envia a notificação com som e push garantidos!
+                if bot_notifier.is_enabled:
+                    notify_chat = me.id if target_dest == "me" else target_dest
+                    bot_sent = await bot_notifier.send_notification(
+                        chat_id=notify_chat,
+                        matched_term=matched_term,
+                        channel_title=chat_title,
+                        reply_to_message_id=target_id if notify_chat == target_dest else None
+                    )
+
+                if not bot_sent:
+                    tag_text = (
+                        f"🎯 **Promoção Encontrada!**\n"
+                        f"🏷️ **Termo correspondente:** `{matched_term}`\n"
+                        f"📢 **Canal de origem:** {chat_title}"
+                    )
+                    try:
+                        await client.send_message(target_dest, tag_text, reply_to=target_id)
+                    except Exception:
+                        await client.send_message(target_dest, tag_text)
 
         except ChatForwardsRestrictedError:
             # Fallback para canais que bloqueiam encaminhamento nativo
-            fallback_msg = (
-                f"🎯 **Promoção Encontrada!**\n"
-                f"🏷️ **Termo:** `{matched_term}`\n"
-                f"📢 **Canal:** {chat_title} _(encaminhamento restrito)_\n\n"
-                f"{raw_text}"
-            )
-            if urls:
-                fallback_msg += "\n\n🔗 **Links:**\n" + "\n".join(urls)
-            try:
-                await client.send_message(target_dest, fallback_msg)
-            except Exception as send_err:
-                print(Fore.RED + f"[ERRO AO ENVIAR FALLBACK] {send_err}")
+            bot_sent = False
+            if bot_notifier.is_enabled:
+                notify_chat = me.id if target_dest == "me" else target_dest
+                bot_sent = await bot_notifier.send_notification(
+                    chat_id=notify_chat,
+                    matched_term=matched_term,
+                    channel_title=chat_title,
+                    extra_text=raw_text + ("\n\n" + "\n".join(urls) if urls else "")
+                )
+
+            if not bot_sent:
+                fallback_msg = (
+                    f"🎯 **Promoção Encontrada!**\n"
+                    f"🏷️ **Termo:** `{matched_term}`\n"
+                    f"📢 **Canal:** {chat_title} _(encaminhamento restrito)_\n\n"
+                    f"{raw_text}"
+                )
+                if urls:
+                    fallback_msg += "\n\n🔗 **Links:**\n" + "\n".join(urls)
+                try:
+                    await client.send_message(target_dest, fallback_msg)
+                except Exception as send_err:
+                    print(Fore.RED + f"[ERRO AO ENVIAR FALLBACK] {send_err}")
 
         except Exception as e:
             print(Fore.RED + f"[ERRO AO ENCAMINHAR] {e}")
@@ -422,6 +496,15 @@ def print_banner(me):
     print(Fore.YELLOW + f"👤 Conectado como: " + Fore.WHITE + f"{me.first_name} (@{me.username or 'sem username'}) [ID: {me.id}]")
     dest_label = "me (Mensagens Salvas)" if str(config.target_chat).lower() == "me" else str(config.target_chat)
     print(Fore.YELLOW + f"🎯 Destino dos alertas: " + Fore.WHITE + dest_label)
+
+    if bot_notifier.is_enabled and bot_notifier.bot_info:
+        bot_u = bot_notifier.bot_info.get("username", "bot")
+        print(Fore.YELLOW + f"🔔 Notificações sonoras: " + Fore.GREEN + f"ATIVADAS via @{bot_u}")
+    elif bot_notifier.is_enabled:
+        print(Fore.YELLOW + f"🔔 Notificações sonoras: " + Fore.GREEN + "ATIVADAS (Token configurado)")
+    else:
+        print(Fore.YELLOW + f"🔔 Notificações sonoras: " + Fore.WHITE + "Silenciosas " + Fore.YELLOW + "(configure /token para som push)")
+
     print(Fore.YELLOW + f"🔍 Palavras-chave ({len(config.keywords)}): " + Fore.WHITE + f"{', '.join(config.keywords[:6])}{'...' if len(config.keywords) > 6 else ''}")
     print(Fore.YELLOW + f"🚫 Bloqueadas ({len(config.negative_keywords)}): " + Fore.WHITE + f"{', '.join(config.negative_keywords[:5])}{'...' if len(config.negative_keywords) > 5 else ''}")
     print(Fore.YELLOW + f"📡 Modo: " + Fore.WHITE + ("TODOS os canais da conta" if config.monitor_all else f"{len(config.channels)} canais específicos"))
@@ -456,6 +539,11 @@ async def main():
     me = await client.get_me()
     # Carrega diálogos recentes no cache da sessão para garantir resolução de IDs de grupos/canais privados
     await client.get_dialogs(limit=50)
+
+    # Verifica bot notificador se configurado
+    if bot_notifier.is_enabled:
+        await bot_notifier.verify()
+
     print_banner(me)
     await client.run_until_disconnected()
 

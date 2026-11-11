@@ -24,6 +24,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "usado"
     ],
     "target_chat": "me",
+    "bot_token": "",
     "add_tag_reply": True,
     "cooldown_minutes": 15
 }
@@ -147,6 +148,14 @@ class ConfigManager:
     def set_target_chat(self, target: str):
         self.config["target_chat"] = target.strip()
         self.save()
+
+    def set_bot_token(self, token: str):
+        self.config["bot_token"] = token.strip()
+        self.save()
+
+    @property
+    def bot_token(self) -> str:
+        return self.config.get("bot_token", "")
 
     @property
     def keywords(self) -> List[str]:

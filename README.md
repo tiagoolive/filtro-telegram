@@ -59,16 +59,35 @@ Você não precisa abrir o código ou reiniciar o bot para mudar suas palavras-c
 | `/delcanal <@canal>`   | Remove um canal específico da lista monitorada                       | `/delcanal @promobitoficial`                 |
 | `/destino <alvo>`      | Altera o destino dos alertas (`me`, `@canal` ou ID do grupo)         | `/destino me` ou `/destino -123456789`       |
 | `/aqui`                | _(Envie dentro de um grupo/canal privado)_ Define esse chat como destino | `/aqui`                                  |
+| `/token <bot_token>`   | Ativa/altera notificações sonoras via bot do `@BotFather`            | `/token 123456:ABC...`                       |
 | `/status`              | Exibe estatísticas de tempo online e promoções capturadas            | `/status`                                    |
 | `/limparhistorico`     | Limpa o histórico imediato de duplicatas                             | `/limparhistorico`                           |
 
-### 🎯 Enviar alertas para um Grupo ou Canal Privado (com notificação!)
-Por padrão, as ofertas vão para as **Mensagens Salvas** (`me`). Se preferir recebê-las em um grupo privado ou canal exclusivo (inclusive para receber notificações sonoras no celular):
+### 🎯 Enviar alertas para um Grupo ou Canal Privado
+Por padrão, as ofertas vão para as **Mensagens Salvas** (`me`). Se preferir recebê-las em um grupo privado ou canal exclusivo:
 1. Crie um grupo privado (ou canal privado) no Telegram.
 2. Entre nele e envie a mensagem `/aqui`.
 3. O bot reconhecerá o ID automaticamente e passará a enviar todas as promoções filtradas para lá (sem monitorar esse grupo como fonte, evitando loops).
 
 > Para voltar às Mensagens Salvas a qualquer momento, envie `/destino me`.
+
+---
+
+### 🔔 Como Ativar Notificações Sonoras e Push no Celular
+
+Por padrão do Telegram, mensagens encaminhadas pela sua própria conta não tocam som no celular. Para receber **notificações sonoras reais e pop-up**, criamos a integração com um bot notificador do `@BotFather`:
+
+1. No Telegram, abra uma conversa com o **[@BotFather](https://t.me/BotFather)**.
+2. Envie o comando `/newbot`, escolha um nome e um `@username` para o bot (ex: `MeuAlertaPromoBot`).
+3. O BotFather fornecerá um **token HTTP** (ex: `7123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`).
+4. **Ativação (escolha uma das opções):**
+   * **Pelo Telegram:** Envie `/token SEU_TOKEN` nas suas *Mensagens Salvas*.
+   * **Pelo arquivo `.env`:** Preencha `TELEGRAM_BOT_TOKEN=SEU_TOKEN`.
+5. **Configurar o chat:**
+   * Se você usa um **grupo privado**: adicione o seu bot recém-criado dentro do grupo como membro.
+   * Se você usa as **Mensagens Salvas**: abra uma conversa direta com o seu bot e clique em **Começar / Start**.
+
+Pronto! Sempre que uma promoção for encontrada, o bot enviará uma notificação com **som e vibração no seu celular e desktop**!
 
 ---
 
